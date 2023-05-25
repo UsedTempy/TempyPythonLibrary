@@ -85,7 +85,7 @@ def get_video():
 
 @app.route('/movies', methods=['GET'])
 def get_movies():
-    return {}
+    return False
 
 @app.route('/frame_count', methods=['GET'])
 def get_frame_count():
