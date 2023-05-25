@@ -43,7 +43,13 @@ def get_video():
     # Open Video Clip
     clip = VideoFileClip(movie_path)
 
-    # Set the start point and end point for the buffer
+    # Calculate the total number of frames in the video
+    total_frames = int(clip.fps * clip.duration)
+
+    # Adjust the buffer length if it exceeds the remaining frames
+    buffer_length = min(buffer_length, total_frames - start_point)
+
+    # Set the end point for the buffer
     end_point = start_point + buffer_length
 
     # Create a list to store the bitmap data for each table
@@ -63,12 +69,9 @@ def get_video():
             if len(bitmap_data_list) == buffer_length:
                 tables.append(bitmap_data_list)
                 bitmap_data_list = []
+                break  # No need to process remaining frames
 
-            # Break the loop if the end point is reached
-            if i == end_point:
-                break
-
-    # If there are any remaining frames, add them to a new table
+    # If there are any frames remaining, add them to a new table
     if bitmap_data_list:
         tables.append(bitmap_data_list)
 
@@ -83,6 +86,19 @@ def get_video():
 @app.route('/movies', methods=['GET'])
 def get_movies():
     return {}
+
+@app.route('/frame_count', methods=['GET'])
+def get_frame_count():
+    movie_name = request.args.get('movie_name')
+
+    if movie_name not in MovieList:
+        return jsonify({'error': 'Invalid movie name'})
+
+    movie_path = MovieList[movie_name]
+    clip = VideoFileClip(movie_path)
+    frame_count = int(clip.fps * clip.duration)
+
+    return jsonify({'frame_count': frame_count})
 
 if __name__ == '__main__':
     app.run(debug=True)
