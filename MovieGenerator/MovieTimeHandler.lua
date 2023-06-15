@@ -1,141 +1,126 @@
 -- // Services
-local PlayerService = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local CollectionService = game:GetService("CollectionService")
 local RunService = game:GetService("RunService")
 
 -- // Variables
-local LocalPlayer = PlayerService.LocalPlayer
+local ResX, ResY = 160, 90
+
 local ScreenObject = workspace:WaitForChild("Screen")
 local ScreenPlayer = ScreenObject:WaitForChild("ScreenPlayer")
 local StarterGui = ScreenPlayer:WaitForChild("StarterGui")
 local VideoPlayerGui = ScreenPlayer:WaitForChild("VideoPlayer")
 
-local ResX, ResY = 160, 90
+-- // Events
+local MovieFunction = ReplicatedStorage.Remotes.MovieFunction
+local MovieEvent = ReplicatedStorage.Remotes.MovieEvent
 
 -- // Modules
-local ModuleFolder = ReplicatedStorage:WaitForChild("Modules")
-
-local TweenMod = require(ModuleFolder:FindFirstChild("Tween"))
-local GreedyCanvas = require(script.GreedyCanvas)
 local ImageRenderer = require(script.ImageRenderer)
+local GreedyCanvas = require(script.GreedyCanvas)
 
--- // Events
-local EventsFolder = ReplicatedStorage:WaitForChild("Remotes")
 
-local FunctionAPI = EventsFolder:FindFirstChild("FunctionAPI")
-local EventAPI = EventsFolder:FindFirstChild("EventAPI")
+local MovieReceiver = {}
+MovieReceiver.ActiveCanvas = false
+MovieReceiver.ActiveMovie = false
 
--- Init
-local modules = {}
-local returnModFunc = script.Parent.ReturnMod
-local function mod(name)
-	if not modules[name] then
-		modules[name] = returnModFunc:Invoke(name)
-	end
-
-	return modules[name]
+MovieReceiver.Init = function()
+	MovieReceiver.ActiveCanvas = GreedyCanvas.new(ResX, ResY)
+	MovieReceiver.ActiveCanvas:SetParent(VideoPlayerGui.VideoFrame)
 end
 
-local Module = {}
-Module.ActiveMovie = nil
+MovieReceiver.Init()
 
-local MovieTimeHandler = {}
-MovieTimeHandler.__index = MovieTimeHandler
+-- // Movies
+local Movie = {}
+Movie.__index = Movie
 
-local Canvas = GreedyCanvas.new(ResX, ResY)
-Canvas:SetParent(VideoPlayerGui.VideoFrame)
+function Movie.new(MovieName, CurrentMap, NextMap)
+	local instance = setmetatable({}, Movie)
+	instance.MovieName = MovieName
 
-function MovieTimeHandler.new(MovieName, CurrentMap, TotalFrames, FrameCount)
-	local instance = setmetatable({}, MovieTimeHandler)
-	instance.MovieTime = 0
+	instance.ElapsedTime = 0
 
-	instance.CurrentTimeMap = CurrentMap
-	instance.NextTimeMap = false
-	instance.startTime = os.clock()
-	instance.checked = false
-	
-	instance.TotalFrames = TotalFrames
-	instance.FrameCount = FrameCount
+	instance.CurrentMap = CurrentMap or false
+	instance.NextMap = NextMap or false	
+	instance.ReachedBuffer = false
+
+	instance.Update = false
+	instance.TracedFPS = 0
+	instance.TracedSpeed = os.clock()
+
+	instance.Debug = false
 
 	return instance
 end
 
-function MovieTimeHandler:PlayFrames()
-	self.MovieTime = math.clamp(self.MovieTime + 1, 1, #self.CurrentTimeMap[1])
-	ImageRenderer.RenderVideoImage(Canvas, self.CurrentTimeMap[1][self.MovieTime], ResX, ResY)
-	
-	self.CurrentTimeMap[1][self.MovieTime] = ""
-	
-	if self.MovieTime == #self.CurrentTimeMap[1] then
-		if self.checked then return end
-		self.checked = true
-		
-		if self.NextTimeMap then	
-			-- // Load this new map into the current map and reset the movie time
-			table.clear(self.CurrentTimeMap)
-			self.CurrentTimeMap = nil
-			
-			self.CurrentTimeMap = self.NextTimeMap
-			self.MovieTime = 0
-			self.checked = false
-			self.NextTimeMap = false
-			
-			if self.FrameCount >= self.TotalFrames then
-				return
-			end
-			
-			EventAPI:FireServer("UpdateTime")
-		else 
-			-- // Put a loading screen on the movie screen and send request to get a new next map
-			if self.FrameCount >= self.TotalFrames then
-				return
-			end
-			
-			print("Buffer Loading...")
-			
-			repeat task.wait() until self.NextTimeMap ~= false
-			
-			table.clear(self.CurrentTimeMap)
-			self.CurrentTimeMap = nil
+function Movie:Pause()
 
-			self.CurrentTimeMap = self.NextTimeMap
-			self.MovieTime = 0
-			self.checked = false
-			self.NextTimeMap = false
+end
 
-			EventAPI:FireServer("UpdateTime")
+function Movie:Buffer()
+
+end
+
+function Movie:Resume()
+
+end
+
+function Movie:Run()
+	-- // Code keeps track and makes sure it only updates in 60fps
+	if not (self.TracedFPS >= 60) then self.TracedFPS += 1 end
+	if (os.clock() - self.TracedSpeed) >= 1 then self.TracedSpeed = os.clock() if self.Debug then print(self.TracedFPS) end  self.TracedFPS = 0 end
+	if self.TracedFPS >= 60 then return end
+
+	-- // Check if the  current bit map has ended then load the next bitmap and ask for a new next up map
+	self.ElapsedTime = math.clamp(self.ElapsedTime + 1, 1, #self.CurrentMap[1])
+	ImageRenderer.RenderVideoImage(MovieReceiver.ActiveCanvas, self.CurrentMap[1][self.ElapsedTime], ResX, ResY)
+
+	self.CurrentMap[1][self.ElapsedTime] = ""
+
+	if self.ElapsedTime >= #self.CurrentMap[1] then
+		if self.ReachedBuffer then return end
+		self.ReachedBuffer = true
+
+		if self.NextMap then	-- // If a new map exists it'll load it onto the new current map
+			table.clear(self.CurrentMap)
+			self.CurrentMap = nil
+
+			self.CurrentMap = self.NextMap
+			self.ElapsedTime = 0
+			self.ReachedBuffer = false
+			self.NextMap = false
+
+			MovieEvent:FireServer("RequestNewMap")			
+		else  -- // If no new map exists it'll wait until a new map exits and load a buffer screen
+
 		end
 	end
 end
 
-function MovieTimeHandler:UpdateValue(Name, Value)
-	if not self[Name] then return end
-	self[Name] = Value
+function Movie:Clear()
+
 end
 
--- // Remote
-EventAPI.OnClientEvent:Connect(function(Callback, ...)
-	if Callback == "Play" then
-		local MovieName, NewCurrentTimeMap, TotalFrames, FrameCount = unpack({...})
-		Module.ActiveMovie = MovieTimeHandler.new(MovieName, NewCurrentTimeMap, TotalFrames, FrameCount)
-	elseif Callback == "UpdateMap" then
-		local NewNextUpmap, TotalFrames, FrameCount = unpack({...})
-		Module.ActiveMovie.NextTimeMap = typeof(NewNextUpmap) == "table" and NewNextUpmap or false
-		Module.ActiveMovie.TotalFrames = TotalFrames
-		Module.ActiveMovie.FrameCount = FrameCount
+-- // Init
+
+RunService.Heartbeat:Connect(function()
+	if MovieReceiver.ActiveMovie then
+		MovieReceiver.ActiveMovie:Run()
 	end
 end)
 
-task.spawn(function()
-	repeat task.wait() until workspace:GetAttribute("MovieIsPlaying")
-	EventAPI:FireServer("Play", "ShrekMovie")
+MovieEvent.OnClientEvent:Connect(function(Callback, ...)
+	if Callback == "StartMovie" then
+		if MovieReceiver.ActiveMovie then
+			MovieReceiver.ActiveMovie:Clear()
+		end
+
+		MovieReceiver.ActiveMovie = Movie.new(unpack({...}))
+	elseif Callback == "UpdatedNextMap" then
+		if MovieReceiver.ActiveMovie then
+			MovieReceiver.ActiveMovie.NextMap = unpack({...})
+		end
+	end
 end)
 
--- // Update
-RunService.Heartbeat:Connect(function()
-	if not Module.ActiveMovie then return end
-	Module.ActiveMovie:PlayFrames()	
-end)
-
-return Module
+return MovieReceiver
